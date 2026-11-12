@@ -1,0 +1,976 @@
+{
+  "adlc-engineering-datapack": [
+    {
+      "id": "mem_1794502786132_5up1y",
+      "datapackId": "adlc-engineering-datapack",
+      "title": "ADR-002: Unit-of-Work & Repository Pattern",
+      "clusterId": "adlc_coding_standards",
+      "problemSignature": "Team architectural constraint: Direct SQL or raw ORM calls in HTTP route controllers are strictly forbidden. All data access must pass through Repository interfaces governed by Unit-of-Work.",
+      "rootCause": "Prevent architectural drift and inconsistent patterns across developer tools",
+      "verifiedFix": "Direct SQL or raw ORM calls in HTTP route controllers are strictly forbidden. All data access must pass through Repository interfaces governed by Unit-of-Work.",
+      "codeSnippet": "// Example Conforming Pattern for ADR-002\nexport class ConformingService { /* conforms to Direct SQL or raw ORM calls in HTTP route controllers are strictly forbidden. All data access must pass through Repository interfaces governed by Unit-of-Work. */ }",
+      "tags": [
+        "adr",
+        "architecture",
+        "standards",
+        "repository",
+        "unit_of_work",
+        "sql",
+        "database"
+      ],
+      "confidence": 1,
+      "hitCount": 1,
+      "createdAt": "2026-11-12T16:59:46.132Z",
+      "promotedBy": "cursor_ide_lead_architect"
+    }
+  ],
+  "omni-resolve-shared-datapack": [
+    {
+      "id": "mem_1794502786188_5xqsw",
+      "datapackId": "omni-resolve-shared-datapack",
+      "title": "AUTHENTICATION: Intermittent 401 Unauthorized during concurrent dashboa",
+      "clusterId": "cluster_oauth_refresh",
+      "problemSignature": "Intermittent 401 Unauthorized during concurrent dashboard load | When users refresh our dashboard containing 6 parallel widgets, all 6 widgets fire simultaneous requ | HTTP 401 Unauthorized - {\"error\": \"token_revoked\", \"error_description\": \"Token reuse detected on refresh token rotation\"}",
+      "rootCause": "Race condition on concurrent API requests using Refresh Token Rotation (RTR). First request consumes refresh token; subsequent parallel requests trigger replay-attack invalidation of entire token family.",
+      "verifiedFix": "Implement single-flight promise locking for in-flight /oauth/token refresh requests.; Queue secondary concurrent requests behind the active refresh promise.; Configure 30-second server grace period for in-transit token leeway window.; Update client HTTP interceptor to deduplicate 401 events.",
+      "codeSnippet": "\n// Single-Flight In-Flight Refresh Token Interceptor\nlet isRefreshing = false;\nlet refreshPromise: Promise<string> | null = null;\n\nasync function getValidToken(): Promise<string> {\n  if (!isTokenExpired()) return currentToken;\n  if (isRefreshing && refreshPromise) return refreshPromise;\n\n  isRefreshing = true;\n  refreshPromise = (async () => {\n    try {\n      const res = await api.post('/oauth/token', {\n        grant_type: 'refresh_token',\n        refresh_token: currentRefreshToken\n      });\n      currentToken = res.data.access_token;\n      currentRefreshToken = res.data.refresh_token;\n      return currentToken;\n    } finally {\n      isRefreshing = false;\n      refreshPromise = null;\n    }\n  })();\n  return refreshPromise;\n}",
+      "tags": [
+        "authentication",
+        "oauth",
+        "refresh",
+        "production"
+      ],
+      "confidence": 0.98,
+      "hitCount": 4,
+      "createdAt": "2026-11-12T16:59:46.188Z",
+      "promotedBy": "senior_staff_eng_hitl"
+    },
+    {
+      "id": "mem_1794502786193_b2spo",
+      "datapackId": "omni-resolve-shared-datapack",
+      "title": "WEBHOOKS: Webhook signature verification fails on all POST reques",
+      "clusterId": "cluster_webhook_hmac",
+      "problemSignature": "Webhook signature verification fails on all POST requests | We are receiving webhooks for order.created, but our receiver keeps failing HMAC validation. We chec | WebhookSignatureVerificationError: Signatures do not match. Expected e3b0c44298fc1c14... received 7a3b8901...",
+      "rootCause": "HMAC-SHA256 signature mismatch caused by standard JSON body-parser re-encoding payload before digest verification, altering byte order or stripping whitespace.",
+      "verifiedFix": "Preserve unparsed raw Buffer stream from incoming HTTP request before JSON parsing.; Compute HMAC digest directly on rawBuffer using crypto.createHmac(\"sha256\", secret).; Compare digests using crypto.timingSafeEqual() to prevent timing side-channel leaks.",
+      "codeSnippet": "\n// Express / Fastify Raw Body Capture for HMAC\nimport crypto from 'node:crypto';\n\nexport function verifyWebhook(req: Request, rawBodyBuffer: Buffer, secret: string): boolean {\n  const incomingSig = req.headers['x-hub-signature-256'] as string;\n  if (!incomingSig) return false;\n  \n  const expectedSig = 'sha256=' + crypto\n    .createHmac('sha256', secret)\n    .update(rawBodyBuffer)\n    .digest('hex');\n    \n  return crypto.timingSafeEqual(\n    Buffer.from(incomingSig),\n    Buffer.from(expectedSig)\n  );\n}",
+      "tags": [
+        "webhooks",
+        "webhook",
+        "hmac",
+        "production"
+      ],
+      "confidence": 0.98,
+      "hitCount": 5,
+      "createdAt": "2026-11-12T16:59:46.193Z",
+      "promotedBy": "senior_staff_eng_hitl"
+    },
+    {
+      "id": "mem_1794502786196_xezeo",
+      "datapackId": "omni-resolve-shared-datapack",
+      "title": "RATE-LIMITING: Bulk data export job crashing with 429 Too Many Request",
+      "clusterId": "cluster_rate_limiting",
+      "problemSignature": "Bulk data export job crashing with 429 Too Many Requests | We kick off an hourly bulk sync job that fetches records in 50 concurrent threads. Within 4 seconds, | HTTP 429 Too Many Requests - {\"error\": \"rate_limit_exceeded\", \"limit\": 5000, \"retry_after\": 12}",
+      "rootCause": "Burst batch workers exceeding Token Bucket limit and retrying without inspecting Retry-After header or adding jitter, triggering secondary blocking penalties.",
+      "verifiedFix": "Inspect Retry-After HTTP response header on 429 status.; Implement Full-Jitter Exponential Backoff algorithm: sleep = random_uniform(0, min(max_backoff, base * 2^attempt)).; Clamp batch concurrency worker pool to stay below 80% of sustained rate limit.",
+      "codeSnippet": "\nasync function fetchWithJitterBackoff(url: string, maxRetries = 5) {\n  for (let attempt = 0; attempt < maxRetries; attempt++) {\n    const res = await fetch(url);\n    if (res.status !== 429) return res;\n    \n    const retryAfter = parseInt(res.headers.get('retry-after') || '2', 10);\n    const baseBackoff = Math.max(retryAfter * 1000, 1000 * Math.pow(2, attempt));\n    const jitteredSleep = Math.floor(Math.random() * Math.min(30000, baseBackoff));\n    \n    await new Promise(r => setTimeout(r, jitteredSleep));\n  }\n  throw new Error('Max retries exceeded on 429');\n}",
+      "tags": [
+        "rate-limiting",
+        "rate",
+        "limiting",
+        "production"
+      ],
+      "confidence": 0.98,
+      "hitCount": 4,
+      "createdAt": "2026-11-12T16:59:46.196Z",
+      "promotedBy": "senior_staff_eng_hitl"
+    },
+    {
+      "id": "mem_1794502786200_d9hc8",
+      "datapackId": "omni-resolve-shared-datapack",
+      "title": "BILLING: Customer confused by unexpected negative charge on seat",
+      "clusterId": "cluster_billing_proration",
+      "problemSignature": "Customer confused by unexpected negative charge on seat downgrade | A customer downgraded from 50 seats to 20 seats on day 15 of their 30-day billing cycle. They expect | Billing Notice: Proration item -$450.00 applied to customer balance, invoice total $0.00",
+      "rootCause": "Mid-cycle subscription downgrade creates an unapplied credit balance item on the customer account rather than an automatic cash refund to credit card.",
+      "verifiedFix": "Clarify to customer that seat removal generates a positive credit memo towards next month's invoice.; Use stripe.invoices.retrieveUpcoming({ proration_date: timestamp }) to show real-time invoice adjustment prior to confirmation.; If customer demands cash return, issue an explicit refund against the original charge ID via Stripe dashboard/API.",
+      "codeSnippet": "\n// Stripe Proration Preview & Downgrade\nconst upcoming = await stripe.invoices.retrieveUpcoming({\n  customer: customerId,\n  subscription: subscriptionId,\n  subscription_items: [{ id: subscriptionItemId, quantity: newSeatCount }],\n  proration_date: Math.floor(Date.now() / 1000)\n});\nconsole.log('Immediate Credit Applied:', upcoming.amount_due);",
+      "tags": [
+        "billing",
+        "proration",
+        "production"
+      ],
+      "confidence": 0.98,
+      "hitCount": 4,
+      "createdAt": "2026-11-12T16:59:46.200Z",
+      "promotedBy": "senior_staff_eng_hitl"
+    },
+    {
+      "id": "mem_1794502786208_nuzt2",
+      "datapackId": "omni-resolve-shared-datapack",
+      "title": "CORS: Browser blocking POST requests with CORS preflight 403 ",
+      "clusterId": "cluster_cors_options",
+      "problemSignature": "Browser blocking POST requests with CORS preflight 403 Forbidden | Our single page application at app.frontend.com cannot call api.frontend.com/v1/auth. Chrome DevTool | Access to fetch at 'https://api.frontend.com/v1/auth' from origin 'https://app.frontend.com' has been blocked by CORS policy: Response to preflight request doesn't have HTTP ok status.",
+      "rootCause": "Edge reverse proxy / API gateway intercepting CORS preflight OPTIONS requests and returning 401/403 because authentication tokens are omitted by browsers during preflight.",
+      "verifiedFix": "Configure edge proxy (NGINX/Cloudflare/ALB) to bypass auth middlewares on OPTIONS requests.; Return HTTP 204 No Content directly from edge proxy for valid origins.; Set Access-Control-Allow-Origin to specific requesting Origin (never wildcard '*' when credentials=include).",
+      "codeSnippet": "\n# NGINX Edge Preflight Pass-Through\nif ($request_method = 'OPTIONS') {\n  add_header 'Access-Control-Allow-Origin' '$http_origin' always;\n  add_header 'Access-Control-Allow-Credentials' 'true' always;\n  add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;\n  add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, X-Request-ID' always;\n  add_header 'Access-Control-Max-Age' 86400;\n  return 204;\n}",
+      "tags": [
+        "cors",
+        "options",
+        "production"
+      ],
+      "confidence": 0.98,
+      "hitCount": 3,
+      "createdAt": "2026-11-12T16:59:46.208Z",
+      "promotedBy": "senior_staff_eng_hitl"
+    },
+    {
+      "id": "mem_1794502786210_6fpsb",
+      "datapackId": "omni-resolve-shared-datapack",
+      "title": "CORS: CORS error: The value of Access-Control-Allow-Origin ca",
+      "clusterId": "cluster_cors_options",
+      "problemSignature": "CORS error: The value of Access-Control-Allow-Origin cannot be wildcard when credentials used | Frontend uses credentials: include for session cookies. Server responds with Access-Control-Allow-Or | The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'.",
+      "rootCause": "Edge reverse proxy / API gateway intercepting CORS preflight OPTIONS requests and returning 401/403 because authentication tokens are omitted by browsers during preflight.",
+      "verifiedFix": "Configure edge proxy (NGINX/Cloudflare/ALB) to bypass auth middlewares on OPTIONS requests.; Return HTTP 204 No Content directly from edge proxy for valid origins.; Set Access-Control-Allow-Origin to specific requesting Origin (never wildcard '*' when credentials=include).",
+      "codeSnippet": "\n# NGINX Edge Preflight Pass-Through\nif ($request_method = 'OPTIONS') {\n  add_header 'Access-Control-Allow-Origin' '$http_origin' always;\n  add_header 'Access-Control-Allow-Credentials' 'true' always;\n  add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;\n  add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, X-Request-ID' always;\n  add_header 'Access-Control-Max-Age' 86400;\n  return 204;\n}",
+      "tags": [
+        "cors",
+        "options",
+        "staging"
+      ],
+      "confidence": 0.98,
+      "hitCount": 2,
+      "createdAt": "2026-11-12T16:59:46.210Z",
+      "promotedBy": "senior_staff_eng_hitl"
+    },
+    {
+      "id": "mem_1794502786212_2ixie",
+      "datapackId": "omni-resolve-shared-datapack",
+      "title": "DATABASE: API servers hanging with Connection pool timeout after ",
+      "clusterId": "cluster_db_pooling",
+      "problemSignature": "API servers hanging with Connection pool timeout after high load | After running a heavy batch of payment reconciliation webhooks, all backend API servers stop accepti | TimeoutError: ResourceRequest timed out after 30000ms. Active: 50, Idle: 0, Pending: 87",
+      "rootCause": "Database connection leak caused by missing finally release block in error handlers, steadily exhausting pool until server max_connections is saturated.",
+      "verifiedFix": "Ensure pool.connect() client is wrapped in try...finally with client.release() in finally.; Set statement_timeout = 15000 and idle_in_transaction_session_timeout = 30000 on DB server.; Deploy PgBouncer / Yugabyte smart client connection pooling for serverless and batch workers.",
+      "codeSnippet": "\n// Safe Connection Loan Pattern\nexport async function withDbClient<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {\n  const client = await pool.connect();\n  try {\n    return await fn(client);\n  } finally {\n    client.release(); // Guaranteed release even on exceptions\n  }\n}",
+      "tags": [
+        "database",
+        "db",
+        "pooling",
+        "production"
+      ],
+      "confidence": 0.98,
+      "hitCount": 4,
+      "createdAt": "2026-11-12T16:59:46.212Z",
+      "promotedBy": "senior_staff_eng_hitl"
+    },
+    {
+      "id": "mem_1794502786216_00b40",
+      "datapackId": "omni-resolve-shared-datapack",
+      "title": "STORAGE: Large 500MB video uploads failing at 95% with 403 Reque",
+      "clusterId": "cluster_s3_presigned",
+      "problemSignature": "Large 500MB video uploads failing at 95% with 403 Request has expired | Users uploading 4K video files over residential broadband fail after ~15 minutes. The presigned PUT  | <?xml version=\"1.0\" encoding=\"UTF-8\"?><Error><Code>RequestTimeTooSkewed</Code><Message>The difference between the request time and the current time is too large.</Message></Error>",
+      "rootCause": "Presigned upload URL expired prior to completion of slow network transfer; client aborted entire file instead of chunk-level resumption.",
+      "verifiedFix": "Mandate S3 Multipart Upload API for files exceeding 50MB.; Generate short-lived (10 min) presigned URLs per individual chunk just-in-time.; Allow client to retry only failed/expired chunks with a fresh presigned URL without discarding previous parts.",
+      "codeSnippet": "\n// Resumable Chunked Multipart Upload\nasync function uploadPartWithFreshUrl(uploadId: string, partNumber: number, chunk: Blob) {\n  const { presignedUrl } = await api.get('/storage/presigned-part', {\n    params: { uploadId, partNumber }\n  });\n  const res = await fetch(presignedUrl, { method: 'PUT', body: chunk });\n  const etag = res.headers.get('ETag');\n  return { PartNumber: partNumber, ETag: etag };\n}",
+      "tags": [
+        "storage",
+        "s3",
+        "presigned",
+        "production"
+      ],
+      "confidence": 0.98,
+      "hitCount": 4,
+      "createdAt": "2026-11-12T16:59:46.216Z",
+      "promotedBy": "senior_staff_eng_hitl"
+    }
+  ],
+  "fraud-raw-signals": [
+    {
+      "id": "mem_1794502786240_uuey2",
+      "datapackId": "fraud-raw-signals",
+      "title": "IP Threat Signal: victim_usr_101",
+      "clusterId": "threat_ip_anomaly",
+      "problemSignature": "victim_usr_101 | 194.26.29.10 | ASN Bulletproof",
+      "rootCause": "High-risk anonymizing proxy login attempt",
+      "verifiedFix": "Mandate step-up MFA challenge on next session event",
+      "tags": [
+        "fraud",
+        "ip_anomaly",
+        "victim_usr_101",
+        "194.26.29.10"
+      ],
+      "confidence": 0.95,
+      "hitCount": 498,
+      "createdAt": "2026-11-12T16:59:46.240Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786240_8v47m",
+      "datapackId": "fraud-raw-signals",
+      "title": "Device Threat Signal: victim_usr_101",
+      "clusterId": "threat_device_mismatch",
+      "problemSignature": "victim_usr_101 | fp_tor_headless_1",
+      "rootCause": "Headless automation signature detected on newly registered device",
+      "verifiedFix": "Quarantine device registration and notify security operations",
+      "tags": [
+        "fraud",
+        "device_mismatch",
+        "victim_usr_101",
+        "fp_tor_headless_1"
+      ],
+      "confidence": 0.95,
+      "hitCount": 1,
+      "createdAt": "2026-11-12T16:59:46.240Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786243_oq4l5",
+      "datapackId": "fraud-raw-signals",
+      "title": "IP Threat Signal: victim_usr_204",
+      "clusterId": "threat_ip_anomaly",
+      "problemSignature": "victim_usr_204 | 194.26.29.11 | ASN Bulletproof",
+      "rootCause": "High-risk anonymizing proxy login attempt",
+      "verifiedFix": "Mandate step-up MFA challenge on next session event",
+      "tags": [
+        "fraud",
+        "ip_anomaly",
+        "victim_usr_204",
+        "194.26.29.11"
+      ],
+      "confidence": 0.95,
+      "hitCount": 427,
+      "createdAt": "2026-11-12T16:59:46.243Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786243_v8ovu",
+      "datapackId": "fraud-raw-signals",
+      "title": "Device Threat Signal: victim_usr_204",
+      "clusterId": "threat_device_mismatch",
+      "problemSignature": "victim_usr_204 | fp_tor_headless_2",
+      "rootCause": "Headless automation signature detected on newly registered device",
+      "verifiedFix": "Quarantine device registration and notify security operations",
+      "tags": [
+        "fraud",
+        "device_mismatch",
+        "victim_usr_204",
+        "fp_tor_headless_2"
+      ],
+      "confidence": 0.95,
+      "hitCount": 1,
+      "createdAt": "2026-11-12T16:59:46.243Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786248_exa2g",
+      "datapackId": "fraud-raw-signals",
+      "title": "IP Threat Signal: victim_usr_309",
+      "clusterId": "threat_ip_anomaly",
+      "problemSignature": "victim_usr_309 | 194.26.29.12 | ASN Bulletproof",
+      "rootCause": "High-risk anonymizing proxy login attempt",
+      "verifiedFix": "Mandate step-up MFA challenge on next session event",
+      "tags": [
+        "fraud",
+        "ip_anomaly",
+        "victim_usr_309",
+        "194.26.29.12"
+      ],
+      "confidence": 0.95,
+      "hitCount": 366,
+      "createdAt": "2026-11-12T16:59:46.248Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786248_o4y01",
+      "datapackId": "fraud-raw-signals",
+      "title": "Device Threat Signal: victim_usr_309",
+      "clusterId": "threat_device_mismatch",
+      "problemSignature": "victim_usr_309 | fp_tor_headless_3",
+      "rootCause": "Headless automation signature detected on newly registered device",
+      "verifiedFix": "Quarantine device registration and notify security operations",
+      "tags": [
+        "fraud",
+        "device_mismatch",
+        "victim_usr_309",
+        "fp_tor_headless_3"
+      ],
+      "confidence": 0.95,
+      "hitCount": 1,
+      "createdAt": "2026-11-12T16:59:46.248Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786254_w7nnp",
+      "datapackId": "fraud-raw-signals",
+      "title": "IP Threat Signal: victim_usr_412",
+      "clusterId": "threat_ip_anomaly",
+      "problemSignature": "victim_usr_412 | 194.26.29.13 | ASN Bulletproof",
+      "rootCause": "High-risk anonymizing proxy login attempt",
+      "verifiedFix": "Mandate step-up MFA challenge on next session event",
+      "tags": [
+        "fraud",
+        "ip_anomaly",
+        "victim_usr_412",
+        "194.26.29.13"
+      ],
+      "confidence": 0.95,
+      "hitCount": 299,
+      "createdAt": "2026-11-12T16:59:46.254Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786255_j1wf5",
+      "datapackId": "fraud-raw-signals",
+      "title": "Device Threat Signal: victim_usr_412",
+      "clusterId": "threat_device_mismatch",
+      "problemSignature": "victim_usr_412 | fp_tor_headless_4",
+      "rootCause": "Headless automation signature detected on newly registered device",
+      "verifiedFix": "Quarantine device registration and notify security operations",
+      "tags": [
+        "fraud",
+        "device_mismatch",
+        "victim_usr_412",
+        "fp_tor_headless_4"
+      ],
+      "confidence": 0.95,
+      "hitCount": 1,
+      "createdAt": "2026-11-12T16:59:46.255Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786263_lo2ey",
+      "datapackId": "fraud-raw-signals",
+      "title": "IP Threat Signal: victim_usr_550",
+      "clusterId": "threat_ip_anomaly",
+      "problemSignature": "victim_usr_550 | 194.26.29.14 | ASN Bulletproof",
+      "rootCause": "High-risk anonymizing proxy login attempt",
+      "verifiedFix": "Mandate step-up MFA challenge on next session event",
+      "tags": [
+        "fraud",
+        "ip_anomaly",
+        "victim_usr_550",
+        "194.26.29.14"
+      ],
+      "confidence": 0.95,
+      "hitCount": 219,
+      "createdAt": "2026-11-12T16:59:46.263Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786263_9uuug",
+      "datapackId": "fraud-raw-signals",
+      "title": "Device Threat Signal: victim_usr_550",
+      "clusterId": "threat_device_mismatch",
+      "problemSignature": "victim_usr_550 | fp_tor_headless_5",
+      "rootCause": "Headless automation signature detected on newly registered device",
+      "verifiedFix": "Quarantine device registration and notify security operations",
+      "tags": [
+        "fraud",
+        "device_mismatch",
+        "victim_usr_550",
+        "fp_tor_headless_5"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.263Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786276_ry46n",
+      "datapackId": "fraud-raw-signals",
+      "title": "IP Threat Signal: victim_usr_688",
+      "clusterId": "threat_ip_anomaly",
+      "problemSignature": "victim_usr_688 | 194.26.29.15 | ASN Bulletproof",
+      "rootCause": "High-risk anonymizing proxy login attempt",
+      "verifiedFix": "Mandate step-up MFA challenge on next session event",
+      "tags": [
+        "fraud",
+        "ip_anomaly",
+        "victim_usr_688",
+        "194.26.29.15"
+      ],
+      "confidence": 0.95,
+      "hitCount": 1,
+      "createdAt": "2026-11-12T16:59:46.276Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786276_tmzy2",
+      "datapackId": "fraud-raw-signals",
+      "title": "Device Threat Signal: victim_usr_688",
+      "clusterId": "threat_device_mismatch",
+      "problemSignature": "victim_usr_688 | fp_tor_headless_6",
+      "rootCause": "Headless automation signature detected on newly registered device",
+      "verifiedFix": "Quarantine device registration and notify security operations",
+      "tags": [
+        "fraud",
+        "device_mismatch",
+        "victim_usr_688",
+        "fp_tor_headless_6"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.276Z",
+      "promotedBy": "hitl_promoter_system"
+    }
+  ],
+  "fraud-confirmed-threats": [
+    {
+      "id": "mem_1794502786241_7jweh",
+      "datapackId": "fraud-confirmed-threats",
+      "title": "CONFIRMED ATO: victim_usr_101",
+      "clusterId": "confirmed_fraud_pattern",
+      "problemSignature": "Takeover coordinated from 194.26.29.10",
+      "rootCause": "Correlated attack signals across LoginMonitor and DeviceAgent",
+      "verifiedFix": "Permanent block on ASN and reset compromised user session",
+      "tags": [
+        "confirmed_fraud",
+        "victim_usr_101",
+        "194.26.29.10"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.241Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786244_ersnk",
+      "datapackId": "fraud-confirmed-threats",
+      "title": "CONFIRMED ATO: victim_usr_204",
+      "clusterId": "confirmed_fraud_pattern",
+      "problemSignature": "Takeover coordinated from 194.26.29.11",
+      "rootCause": "Correlated attack signals across LoginMonitor and DeviceAgent",
+      "verifiedFix": "Permanent block on ASN and reset compromised user session",
+      "tags": [
+        "confirmed_fraud",
+        "victim_usr_204",
+        "194.26.29.11"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.244Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786248_sku31",
+      "datapackId": "fraud-confirmed-threats",
+      "title": "CONFIRMED ATO: victim_usr_309",
+      "clusterId": "confirmed_fraud_pattern",
+      "problemSignature": "Takeover coordinated from 194.26.29.12",
+      "rootCause": "Correlated attack signals across LoginMonitor and DeviceAgent",
+      "verifiedFix": "Permanent block on ASN and reset compromised user session",
+      "tags": [
+        "confirmed_fraud",
+        "victim_usr_309",
+        "194.26.29.12"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.248Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786255_euo9o",
+      "datapackId": "fraud-confirmed-threats",
+      "title": "CONFIRMED ATO: victim_usr_412",
+      "clusterId": "confirmed_fraud_pattern",
+      "problemSignature": "Takeover coordinated from 194.26.29.13",
+      "rootCause": "Correlated attack signals across LoginMonitor and DeviceAgent",
+      "verifiedFix": "Permanent block on ASN and reset compromised user session",
+      "tags": [
+        "confirmed_fraud",
+        "victim_usr_412",
+        "194.26.29.13"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.255Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786267_q7a3z",
+      "datapackId": "fraud-confirmed-threats",
+      "title": "CONFIRMED ATO: victim_usr_550",
+      "clusterId": "confirmed_fraud_pattern",
+      "problemSignature": "Takeover coordinated from 194.26.29.14",
+      "rootCause": "Correlated attack signals across LoginMonitor and DeviceAgent",
+      "verifiedFix": "Permanent block on ASN and reset compromised user session",
+      "tags": [
+        "confirmed_fraud",
+        "victim_usr_550",
+        "194.26.29.14"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.267Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786276_se6vt",
+      "datapackId": "fraud-confirmed-threats",
+      "title": "CONFIRMED ATO: victim_usr_688",
+      "clusterId": "confirmed_fraud_pattern",
+      "problemSignature": "Takeover coordinated from 194.26.29.15",
+      "rootCause": "Correlated attack signals across LoginMonitor and DeviceAgent",
+      "verifiedFix": "Permanent block on ASN and reset compromised user session",
+      "tags": [
+        "confirmed_fraud",
+        "victim_usr_688",
+        "194.26.29.15"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.276Z",
+      "promotedBy": "hitl_promoter_system"
+    }
+  ],
+  "marketing-campaign-learnings": [
+    {
+      "id": "mem_1794502786299_x7faa",
+      "datapackId": "marketing-campaign-learnings",
+      "title": "Cycle 1 Learning: Technical Pain-First Copy Outperforms Buzzwords by 3.4x",
+      "clusterId": "marketing_copy_opt",
+      "problemSignature": "Generic buzzwords like \"supercharge\" produce low 1.4% CTR across engineering buyers",
+      "rootCause": "Engineering buyers reject marketing fluff and respond only to concrete architectural pain (e.g. Cursor/Claude context drift, token explosion)",
+      "verifiedFix": "Mandate specific engineering metrics (-80% tokens), named IDE integrations (Cursor/Claude Code), and compliance guarantees (RBAC/YugabyteDB)",
+      "tags": [
+        "marketing",
+        "copy",
+        "conversion",
+        "roas",
+        "ctr"
+      ],
+      "confidence": 0.95,
+      "hitCount": 1,
+      "createdAt": "2026-11-12T16:59:46.299Z",
+      "promotedBy": "senior_campaign_analyst"
+    }
+  ],
+  "financial-planning-household": [
+    {
+      "id": "mem_1794502786300_5id92",
+      "datapackId": "financial-planning-household",
+      "title": "Household Profile: Alex & Morgan Rivera",
+      "clusterId": "financial_household_goals",
+      "problemSignature": "Income $160000, Debt $32000, Emergency $25000",
+      "rootCause": "Initial financial milestone establishment",
+      "verifiedFix": "Allocate $1,400/mo aggressively to student loans; $600/mo to emergency cushion",
+      "tags": [
+        "budget",
+        "household",
+        "debt",
+        "student_loans",
+        "alex_morgan"
+      ],
+      "confidence": 0.95,
+      "hitCount": 2,
+      "createdAt": "2026-11-12T16:59:46.300Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786300_x56m5",
+      "datapackId": "financial-planning-household",
+      "title": "Life Event: Baby Born (New Dependent Added)",
+      "clusterId": "financial_household_goals",
+      "problemSignature": "Child birth increases monthly recurring medical & care costs by $700/mo",
+      "rootCause": "Shift financial strategy to accommodate dependent while protecting core savings",
+      "verifiedFix": "Reduce debt payoff from $1,400 to $700; allocate $400 to 529 college plan, $300 to child care",
+      "tags": [
+        "budget",
+        "baby",
+        "dependent",
+        "529",
+        "alex_morgan"
+      ],
+      "confidence": 0.95,
+      "hitCount": 1,
+      "createdAt": "2026-11-12T16:59:46.300Z",
+      "promotedBy": "hitl_promoter_system"
+    }
+  ],
+  "healthcare-clinical-datapack": [
+    {
+      "id": "mem_1794502786302_57rx3",
+      "datapackId": "healthcare-clinical-datapack",
+      "title": "CRITICAL ALLERGY: Eleanor Vance - Penicillin Anaphylaxis",
+      "clusterId": "patient_safety_allergies",
+      "problemSignature": "Eleanor Vance | Penicillin Anaphylaxis | ICU 2018",
+      "rootCause": "Severe life-threatening allergic reaction to beta-lactam antibiotics",
+      "verifiedFix": "Strict contraindication: Never administer Penicillin, Amoxicillin, or Ampicillin. Substitute with Azithromycin or Doxycycline.",
+      "tags": [
+        "patient",
+        "allergy",
+        "penicillin",
+        "amoxicillin",
+        "anaphylaxis"
+      ],
+      "confidence": 1,
+      "hitCount": 2,
+      "createdAt": "2026-11-12T16:59:46.302Z",
+      "promotedBy": "dr_sarah_chen_md"
+    }
+  ],
+  "audit-underwriting-decisions": [
+    {
+      "id": "mem_1794502786304_dchyk",
+      "datapackId": "audit-underwriting-decisions",
+      "title": "Underwriting Decision: Sophia Martinez - APPROVED",
+      "clusterId": "underwriting_decisions",
+      "problemSignature": "app_101 | Score: 780 | DTI: 20%",
+      "rootCause": "Final credit risk determination: APPROVED",
+      "verifiedFix": "Approved for prime disbursement",
+      "tags": [
+        "underwriting",
+        "approved",
+        "app_101"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.304Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786345_hbvt3",
+      "datapackId": "audit-underwriting-decisions",
+      "title": "Underwriting Decision: David Kim - DENIED",
+      "clusterId": "underwriting_decisions",
+      "problemSignature": "app_102 | Score: 610 | DTI: 58%",
+      "rootCause": "Final credit risk determination: DENIED",
+      "verifiedFix": "Credit score (610) below mandatory 640 minimum; Debt-to-income ratio (58%) exceeds 43% maximum limit",
+      "tags": [
+        "underwriting",
+        "denied",
+        "app_102"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.345Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786345_pnyoe",
+      "datapackId": "audit-underwriting-decisions",
+      "title": "Underwriting Decision: Emily Chen - APPROVED",
+      "clusterId": "underwriting_decisions",
+      "problemSignature": "app_103 | Score: 720 | DTI: 33%",
+      "rootCause": "Final credit risk determination: APPROVED",
+      "verifiedFix": "Approved for prime disbursement",
+      "tags": [
+        "underwriting",
+        "approved",
+        "app_103"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.345Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786345_fmu78",
+      "datapackId": "audit-underwriting-decisions",
+      "title": "Underwriting Decision: Marcus Johnson - CONDITIONALLY_APPROVED",
+      "clusterId": "underwriting_decisions",
+      "problemSignature": "app_104 | Score: 690 | DTI: 43%",
+      "rootCause": "Final credit risk determination: CONDITIONALLY_APPROVED",
+      "verifiedFix": "",
+      "tags": [
+        "underwriting",
+        "conditionally_approved",
+        "app_104"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.345Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786346_h36l8",
+      "datapackId": "audit-underwriting-decisions",
+      "title": "Underwriting Decision: Priya Patel - APPROVED",
+      "clusterId": "underwriting_decisions",
+      "problemSignature": "app_105 | Score: 810 | DTI: 12%",
+      "rootCause": "Final credit risk determination: APPROVED",
+      "verifiedFix": "Approved for prime disbursement",
+      "tags": [
+        "underwriting",
+        "approved",
+        "app_105"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.346Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786346_eatpm",
+      "datapackId": "audit-underwriting-decisions",
+      "title": "Underwriting Decision: Lucas Silva - DENIED",
+      "clusterId": "underwriting_decisions",
+      "problemSignature": "app_106 | Score: 580 | DTI: 55%",
+      "rootCause": "Final credit risk determination: DENIED",
+      "verifiedFix": "Credit score (580) below mandatory 640 minimum; Debt-to-income ratio (55%) exceeds 43% maximum limit; Insufficient employment history (0.5 yrs < 1 yr minimum)",
+      "tags": [
+        "underwriting",
+        "denied",
+        "app_106"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.346Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786346_v5oo7",
+      "datapackId": "audit-underwriting-decisions",
+      "title": "Underwriting Decision: Aisha Al-Mansoor - APPROVED",
+      "clusterId": "underwriting_decisions",
+      "problemSignature": "app_107 | Score: 740 | DTI: 25%",
+      "rootCause": "Final credit risk determination: APPROVED",
+      "verifiedFix": "Approved for prime disbursement",
+      "tags": [
+        "underwriting",
+        "approved",
+        "app_107"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.346Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786346_y1bo1",
+      "datapackId": "audit-underwriting-decisions",
+      "title": "Underwriting Decision: Brian O'Connor - CONDITIONALLY_APPROVED",
+      "clusterId": "underwriting_decisions",
+      "problemSignature": "app_108 | Score: 660 | DTI: 35%",
+      "rootCause": "Final credit risk determination: CONDITIONALLY_APPROVED",
+      "verifiedFix": "",
+      "tags": [
+        "underwriting",
+        "conditionally_approved",
+        "app_108"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.346Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786346_mhmih",
+      "datapackId": "audit-underwriting-decisions",
+      "title": "Underwriting Decision: Zoe Washington - APPROVED",
+      "clusterId": "underwriting_decisions",
+      "problemSignature": "app_109 | Score: 795 | DTI: 14%",
+      "rootCause": "Final credit risk determination: APPROVED",
+      "verifiedFix": "Approved for prime disbursement",
+      "tags": [
+        "underwriting",
+        "approved",
+        "app_109"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.346Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786346_ld176",
+      "datapackId": "audit-underwriting-decisions",
+      "title": "Underwriting Decision: Carlos Gomez - DENIED",
+      "clusterId": "underwriting_decisions",
+      "problemSignature": "app_110 | Score: 635 | DTI: 52%",
+      "rootCause": "Final credit risk determination: DENIED",
+      "verifiedFix": "Credit score (635) below mandatory 640 minimum; Debt-to-income ratio (52%) exceeds 43% maximum limit",
+      "tags": [
+        "underwriting",
+        "denied",
+        "app_110"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.346Z",
+      "promotedBy": "hitl_promoter_system"
+    }
+  ],
+  "research-token-efficiency": [
+    {
+      "id": "mem_1794502786348_8wc4r",
+      "datapackId": "research-token-efficiency",
+      "title": "Verified Research: Distributed Consensus & Raft Latency",
+      "clusterId": "research_outcomes",
+      "problemSignature": "Compare multi-raft leader election timeouts in WAN deployments",
+      "rootCause": "Distilled technical facts from indexed knowledge base",
+      "verifiedFix": "Verified facts for Distributed Consensus & Raft Latency: Raft consensus in multi-region YugabyteDB clusters requires heartbeat intervals ",
+      "tags": [
+        "research",
+        "databases",
+        "task_01"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.348Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786348_uxuwk",
+      "datapackId": "research-token-efficiency",
+      "title": "Verified Research: OAuth2 RTR Attack Surfaces",
+      "clusterId": "research_outcomes",
+      "problemSignature": "Identify token reuse vulnerabilities in single page apps",
+      "rootCause": "Distilled technical facts from indexed knowledge base",
+      "verifiedFix": "Verified facts for OAuth2 RTR Attack Surfaces: Technical verification complete",
+      "tags": [
+        "research",
+        "security",
+        "task_02"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.348Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786348_yhaxq",
+      "datapackId": "research-token-efficiency",
+      "title": "Verified Research: Stripe Mid-Cycle Prorations",
+      "clusterId": "research_outcomes",
+      "problemSignature": "Calculate seat downgrade credit adjustments",
+      "rootCause": "Distilled technical facts from indexed knowledge base",
+      "verifiedFix": "Verified facts for Stripe Mid-Cycle Prorations: Mid-cycle seat downgrades produce unapplied credit memos rather than instant cre",
+      "tags": [
+        "research",
+        "billing",
+        "task_03"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.348Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786348_8uuz4",
+      "datapackId": "research-token-efficiency",
+      "title": "Verified Research: CORS Preflight Caching",
+      "clusterId": "research_outcomes",
+      "problemSignature": "Optimize Access-Control-Max-Age for edge API gateways",
+      "rootCause": "Distilled technical facts from indexed knowledge base",
+      "verifiedFix": "Verified facts for CORS Preflight Caching: Technical verification complete",
+      "tags": [
+        "research",
+        "networking",
+        "task_04"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.348Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786348_2pi6q",
+      "datapackId": "research-token-efficiency",
+      "title": "Verified Research: Database Connection Pool Starvation",
+      "clusterId": "research_outcomes",
+      "problemSignature": "Detect leaked connections in async webhook consumers",
+      "rootCause": "Distilled technical facts from indexed knowledge base",
+      "verifiedFix": "Verified facts for Database Connection Pool Starvation: Technical verification complete",
+      "tags": [
+        "research",
+        "databases",
+        "task_05"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.348Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786348_ruh2q",
+      "datapackId": "research-token-efficiency",
+      "title": "Verified Research: S3 Multipart Presigned Expiry",
+      "clusterId": "research_outcomes",
+      "problemSignature": "Resumable upload part refreshing on slow networks",
+      "rootCause": "Distilled technical facts from indexed knowledge base",
+      "verifiedFix": "Verified facts for S3 Multipart Presigned Expiry: Technical verification complete",
+      "tags": [
+        "research",
+        "cloud_storage",
+        "task_06"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.348Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786349_tef17",
+      "datapackId": "research-token-efficiency",
+      "title": "Verified Research: ATO Credential Stuffing Signatures",
+      "clusterId": "research_outcomes",
+      "problemSignature": "Correlate ASN bulletproof proxies with headless browser signatures",
+      "rootCause": "Distilled technical facts from indexed knowledge base",
+      "verifiedFix": "Verified facts for ATO Credential Stuffing Signatures: Technical verification complete",
+      "tags": [
+        "research",
+        "security",
+        "task_07"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.349Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786349_r9g6h",
+      "datapackId": "research-token-efficiency",
+      "title": "Verified Research: PostgreSQL Idle In Transaction Timeout",
+      "clusterId": "research_outcomes",
+      "problemSignature": "Configure statement and session timeouts in YugabyteDB",
+      "rootCause": "Distilled technical facts from indexed knowledge base",
+      "verifiedFix": "Verified facts for PostgreSQL Idle In Transaction Timeout: Technical verification complete",
+      "tags": [
+        "research",
+        "databases",
+        "task_08"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.349Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786349_bcpjx",
+      "datapackId": "research-token-efficiency",
+      "title": "Verified Research: HIPAA RBAC Context Boundaries",
+      "clusterId": "research_outcomes",
+      "problemSignature": "Prevent billing agents from accessing psychiatric clinical notes",
+      "rootCause": "Distilled technical facts from indexed knowledge base",
+      "verifiedFix": "Verified facts for HIPAA RBAC Context Boundaries: Technical verification complete",
+      "tags": [
+        "research",
+        "healthcare",
+        "task_09"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.349Z",
+      "promotedBy": "hitl_promoter_system"
+    },
+    {
+      "id": "mem_1794502786350_vafkd",
+      "datapackId": "research-token-efficiency",
+      "title": "Verified Research: Debt-to-Income Regulatory Caps",
+      "clusterId": "research_outcomes",
+      "problemSignature": "Evaluate Fannie Mae conforming mortgage DTI threshold limits",
+      "rootCause": "Distilled technical facts from indexed knowledge base",
+      "verifiedFix": "Verified facts for Debt-to-Income Regulatory Caps: Technical verification complete",
+      "tags": [
+        "research",
+        "finance",
+        "task_10"
+      ],
+      "confidence": 0.95,
+      "hitCount": 0,
+      "createdAt": "2026-11-12T16:59:46.350Z",
+      "promotedBy": "hitl_promoter_system"
+    }
+  ]
+}
