@@ -6,9 +6,9 @@
 
 ## Results Summary
 - **Average Token Reduction Factor:** **15.6x fewer tokens** (Peak: **15.4x**)
-- **Average Baseline Tokens:** 16,391 tokens/task
+- **Average Baseline Tokens:** 16,426 tokens/task
 - **Average Meko Tokens:** 1,050 tokens/task
-- **Latency Reduction:** 3552ms &rarr; 407ms (**-87.8% faster**)
+- **Latency Reduction:** 3607ms &rarr; 416ms (**-87.8% faster**)
 - **Output Quality Score:** 98% (Verified factual accuracy preserved)
 
 ## Methodology Note
