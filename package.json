@@ -1,0 +1,17 @@
+{
+  "name": "omni-resolve",
+  "version": "1.0.0",
+  "description": "OmniResolve: Never Solve It Twice - Autonomous Multi-Agent Support Pipeline Powered by Meko Collective Memory",
+  "author": "manojvenaram",
+  "license": "MIT",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "bun run src/server/web_dashboard.ts",
+    "benchmark": "bun run src/benchmark/run_cli.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
+
