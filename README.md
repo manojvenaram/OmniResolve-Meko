@@ -4,7 +4,6 @@
 
 [![ContextCon 2026](https://img.shields.io/badge/Hackathon-ContextCon%202026-6366F1?style=for-the-badge)](https://www.hackerearth.com/community/challenges/hackathon/contextcon-remember-everything/)
 [![Track](https://img.shields.io/badge/Primary%20Track-Challenge%202%3A%20Never%20Solve%20It%20Twice-10B981?style=for-the-badge)](https://www.hackerearth.com/community/challenges/hackathon/contextcon-remember-everything/)
-[![Target Prize](https://img.shields.io/badge/Target-Grand%20Prize%20%244%2C000%20%2B%20Shared%20Memory%20%241%2C000-F59E0B?style=for-the-badge)](#)
 [![Developer](https://img.shields.io/badge/Author-manojvenaram-8B5CF6?style=for-the-badge)](https://github.com/manojvenaram)
 [![Tests](https://img.shields.io/badge/Tests-100%25%20Passing%20(11%2F11%20Bun)-059669?style=for-the-badge)](#)
 [![All 8 Tracks](https://img.shields.io/badge/Suite-All%208%20Tracks%20Implemented-3B82F6?style=for-the-badge)](#-the-meko-omniverse-all-8-challenges-implemented)
@@ -172,7 +171,6 @@ bun run src/challenges/08_token_efficiency/runner.ts
 
 * **Project Title**: OmniResolve: Never Solve It Twice
 * **Selected Track**: Challenge 2: Agentic Support (*coupled with Challenge 8 Token Efficiency*)
-* **Target Awards**: Grand Prize (\$4,000) & Best Use of Shared Memory (\$1,000)
 * **GitHub Repository**: [https://github.com/manojvenaram/OmniResolve-Meko](https://github.com/manojvenaram/OmniResolve-Meko)
 * **Author**: **Manoj Choudhary V** ([@manojvenaram](https://github.com/manojvenaram))
 
