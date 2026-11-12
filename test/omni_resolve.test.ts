@@ -13,6 +13,7 @@ describe('OmniResolve - Multi-Agent Support with Meko Context Engine', () => {
   let hitlPromoter: HitlPromoter;
 
   beforeEach(async () => {
+    MekoClient.resetAllDatapacks();
     mekoClient = new MekoClient({ datapackId: 'test-support-datapack' });
     await mekoClient.batchIngestKnowledgeDocs(ENTERPRISE_KNOWLEDGE_BASE);
     triageAgent = new TriageAgent(mekoClient);
